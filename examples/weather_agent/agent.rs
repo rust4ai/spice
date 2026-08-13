@@ -75,10 +75,7 @@ impl WeatherAgent {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let text = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "no body".into());
+            let text = resp.text().await.unwrap_or_else(|_| "no body".into());
             return Err(SpiceError::AgentError(format!(
                 "OpenAI API error {}: {}",
                 status, text
@@ -210,6 +207,7 @@ impl AgentUnderTest for WeatherAgent {
                     tools_called: all_tools_called,
                     duration: start.elapsed(),
                     error: None,
+                    usage: None,
                 });
             }
         }
@@ -226,6 +224,7 @@ impl AgentUnderTest for WeatherAgent {
             tools_called: all_tools_called,
             duration: start.elapsed(),
             error: None,
+            usage: None,
         })
     }
 

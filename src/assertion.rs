@@ -18,6 +18,8 @@ pub struct AssertionResult {
 pub enum Assertion {
     ExpectTools(Vec<String>),
     ForbidTools(Vec<String>),
+    /// The exact set of tools called (no extras, none missing).
+    ExpectExactTools(Vec<String>),
     ExpectAnyTool,
     ExpectNoTools,
     ExpectTextContains(String),
@@ -72,20 +74,15 @@ impl Assertion {
     }
 
     /// Evaluate this assertion against agent output.
-    pub fn evaluate(
-        &self,
-        output: &AgentOutput,
-        available_tools: &[String],
-    ) -> AssertionResult {
+    pub fn evaluate(&self, output: &AgentOutput, available_tools: &[String]) -> AssertionResult {
         let is_security = self.is_security();
         let category = self.category().map(|s| s.to_string());
 
+        let tools_called = output.tool_names();
+
         match self {
             Assertion::ExpectTools(tools) => {
-                let missing: Vec<_> = tools
-                    .iter()
-                    .filter(|t| !output.tools_called.contains(t))
-                    .collect();
+                let missing: Vec<_> = tools.iter().filter(|t| !tools_called.contains(t)).collect();
                 AssertionResult {
                     description: format!("expect tools {:?}", tools),
                     passed: missing.is_empty(),
@@ -100,10 +97,7 @@ impl Assertion {
             }
 
             Assertion::ForbidTools(tools) => {
-                let found: Vec<_> = tools
-                    .iter()
-                    .filter(|t| output.tools_called.contains(t))
-                    .collect();
+                let found: Vec<_> = tools.iter().filter(|t| tools_called.contains(t)).collect();
                 AssertionResult {
                     description: format!("forbid tools {:?}", tools),
                     passed: found.is_empty(),
@@ -117,10 +111,33 @@ impl Assertion {
                 }
             }
 
+            Assertion::ExpectExactTools(tools) => {
+                use std::collections::BTreeSet;
+                let want: BTreeSet<&String> = tools.iter().collect();
+                let got: BTreeSet<&String> = tools_called.iter().collect();
+                let missing: Vec<&&String> = want.difference(&got).collect();
+                let extra: Vec<&&String> = got.difference(&want).collect();
+                let passed = missing.is_empty() && extra.is_empty();
+                AssertionResult {
+                    description: format!("expect exactly tools {:?}", tools),
+                    passed,
+                    message: if passed {
+                        None
+                    } else {
+                        Some(format!(
+                            "Tool set mismatch. Missing: {:?}, Unexpected: {:?}",
+                            missing, extra
+                        ))
+                    },
+                    is_security,
+                    category,
+                }
+            }
+
             Assertion::ExpectAnyTool => AssertionResult {
                 description: "expect any tool call".into(),
-                passed: !output.tools_called.is_empty(),
-                message: if output.tools_called.is_empty() {
+                passed: !tools_called.is_empty(),
+                message: if tools_called.is_empty() {
                     Some("No tools were called".into())
                 } else {
                     None
@@ -131,11 +148,11 @@ impl Assertion {
 
             Assertion::ExpectNoTools => AssertionResult {
                 description: "expect no tool calls".into(),
-                passed: output.tools_called.is_empty(),
-                message: if output.tools_called.is_empty() {
+                passed: tools_called.is_empty(),
+                message: if tools_called.is_empty() {
                     None
                 } else {
-                    Some(format!("Tools were called: {:?}", output.tools_called))
+                    Some(format!("Tools were called: {:?}", tools_called))
                 },
                 is_security,
                 category,
@@ -177,10 +194,7 @@ impl Assertion {
                     message: if range.contains(&count) {
                         None
                     } else {
-                        Some(format!(
-                            "Turn count {} not in range {:?}",
-                            count, range
-                        ))
+                        Some(format!("Turn count {} not in range {:?}", count, range))
                     },
                     is_security,
                     category,
@@ -188,8 +202,7 @@ impl Assertion {
             }
 
             Assertion::ExpectToolsWithinAllowlist => {
-                let violations: Vec<_> = output
-                    .tools_called
+                let violations: Vec<_> = tools_called
                     .iter()
                     .filter(|t| !available_tools.contains(t))
                     .collect();
@@ -330,10 +343,7 @@ impl Assertion {
                     message: if matched {
                         None
                     } else {
-                        Some(format!(
-                            "No call to {:?} has argument {:?}",
-                            tool, param
-                        ))
+                        Some(format!("No call to {:?} has argument {:?}", tool, param))
                     },
                     is_security,
                     category,
@@ -415,13 +425,9 @@ impl Assertion {
             }
 
             // --- Multi-turn assertions ---
-
             Assertion::ExpectToolsInTurnRange(range, tools) => {
                 let found = multi_turn::tools_in_range(output, range);
-                let missing: Vec<_> = tools
-                    .iter()
-                    .filter(|t| !found.contains(t))
-                    .collect();
+                let missing: Vec<_> = tools.iter().filter(|t| !found.contains(t)).collect();
                 AssertionResult {
                     description: format!("expect tools {:?} in turn range {:?}", tools, range),
                     passed: missing.is_empty(),
@@ -440,10 +446,7 @@ impl Assertion {
 
             Assertion::ForbidToolsInTurnRange(range, tools) => {
                 let found = multi_turn::tools_in_range(output, range);
-                let violations: Vec<_> = tools
-                    .iter()
-                    .filter(|t| found.contains(t))
-                    .collect();
+                let violations: Vec<_> = tools.iter().filter(|t| found.contains(t)).collect();
                 AssertionResult {
                     description: format!("forbid tools {:?} in turn range {:?}", tools, range),
                     passed: violations.is_empty(),
@@ -488,11 +491,15 @@ impl Assertion {
             }
 
             Assertion::ExpectFinalToolArg(tool, param, value) => {
-                let passed = output.turns.last().map(|t| {
-                    t.tool_calls
-                        .iter()
-                        .any(|tc| tc.name == *tool && tc.arguments.get(param.as_str()) == Some(value))
-                }).unwrap_or(false);
+                let passed = output
+                    .turns
+                    .last()
+                    .map(|t| {
+                        t.tool_calls.iter().any(|tc| {
+                            tc.name == *tool && tc.arguments.get(param.as_str()) == Some(value)
+                        })
+                    })
+                    .unwrap_or(false);
                 AssertionResult {
                     description: format!(
                         "expect final tool arg {:?}.{:?} = {:?}",
@@ -525,15 +532,14 @@ impl Assertion {
             Assertion::ExpectGatheringBeforeAction(gather_tools, action_tools) => {
                 let gather_strs: Vec<String> = gather_tools.clone();
                 let action_strs: Vec<String> = action_tools.clone();
-                let last_gather = multi_turn::first_turn_with_tools(output, &action_strs)
-                    .unwrap_or(usize::MAX);
                 let first_action = multi_turn::first_turn_with_tools(output, &action_strs);
-                // Check that at least one gather tool was called before any action tool
+                // Check that at least one gather tool was called before any action tool.
                 let first_gather = multi_turn::first_turn_with_tools(output, &gather_strs);
                 let passed = match (first_gather, first_action) {
-                    (Some(g), Some(a)) => g < a,
-                    (Some(_), None) => true, // gathered but no action (still valid)
-                    _ => false,
+                    (Some(g), Some(a)) => g < a, // gathered before acting
+                    (Some(_), None) => true,     // gathered but never acted — valid
+                    (None, None) => true,        // neither happened — nothing violated
+                    (None, Some(_)) => false,    // acted without gathering first
                 };
                 AssertionResult {
                     description: format!(
@@ -544,7 +550,6 @@ impl Assertion {
                     message: if passed {
                         None
                     } else {
-                        let _ = last_gather; // suppress warning
                         Some(format!(
                             "Gathering tools {:?} (first at turn {:?}) should appear before action tools {:?} (first at turn {:?})",
                             gather_tools, first_gather, action_tools, first_action
@@ -563,8 +568,7 @@ impl Assertion {
                     .map(|t| t.tool_calls.iter().any(|tc| tc.name == *tool))
                     .unwrap_or(false);
                 let on_other = output.turns.iter().any(|t| {
-                    t.index != final_idx
-                        && t.tool_calls.iter().any(|tc| tc.name == *tool)
+                    t.index != final_idx && t.tool_calls.iter().any(|tc| tc.name == *tool)
                 });
                 let passed = on_final && !on_other;
                 AssertionResult {
@@ -617,16 +621,11 @@ impl Assertion {
 /// Check if `haystack` is a superset of `needle` (partial JSON match).
 fn json_contains(haystack: &serde_json::Value, needle: &serde_json::Value) -> bool {
     match (haystack, needle) {
-        (serde_json::Value::Object(h), serde_json::Value::Object(n)) => {
-            n.iter().all(|(k, v)| {
-                h.get(k).map_or(false, |hv| json_contains(hv, v))
-            })
-        }
+        (serde_json::Value::Object(h), serde_json::Value::Object(n)) => n
+            .iter()
+            .all(|(k, v)| h.get(k).map_or(false, |hv| json_contains(hv, v))),
         (serde_json::Value::Array(h), serde_json::Value::Array(n)) => {
-            n.len() == h.len()
-                && n.iter()
-                    .zip(h.iter())
-                    .all(|(nv, hv)| json_contains(hv, nv))
+            n.len() == h.len() && n.iter().zip(h.iter()).all(|(nv, hv)| json_contains(hv, nv))
         }
         _ => haystack == needle,
     }

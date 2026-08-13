@@ -53,8 +53,8 @@ impl ToolDef {
 
     /// Load a tool definition from a markdown file.
     pub fn from_file(path: &Path) -> Result<Self, String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
         Self::from_markdown(&content)
     }
 
@@ -106,7 +106,10 @@ impl Toolkit {
             .enumerate()
             .map(|(i, t)| (t.name.clone(), i))
             .collect();
-        Self { tools, tools_by_name }
+        Self {
+            tools,
+            tools_by_name,
+        }
     }
 
     /// Load all `.md` files from a directory as tool definitions.
@@ -182,8 +185,8 @@ impl PromptTemplate {
 
     /// Load from a file.
     pub fn from_file(path: &Path) -> Result<Self, String> {
-        let content =
-            std::fs::read_to_string(path).map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
         Ok(Self::new(content))
     }
 

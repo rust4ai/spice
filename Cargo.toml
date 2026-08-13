@@ -1,9 +1,13 @@
 [package]
 name = "spice-framework"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A Rust test framework for nondeterministic LLM agents"
 license = "MIT"
+homepage = "https://github.com/ethereumdegen/spice"
+repository = "https://github.com/ethereumdegen/spice"
+keywords = ["testing", "llm", "agents", "ai", "framework"]
+categories = ["development-tools::testing"]
 
 [dependencies]
 async-trait = "0.1"
@@ -13,6 +17,13 @@ tokio = { version = "1", features = ["full"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 dotenvy = "0.15.7"
+reqwest = { version = "0.12", features = ["json"], optional = true }
+
+[features]
+default = []
+# Enables `judge::OpenAiJudge`, a ready-made LLM-as-judge backed by the OpenAI
+# chat-completions API.
+openai = ["dep:reqwest"]
 
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
@@ -28,3 +39,7 @@ path = "examples/weather_agent/main.rs"
 [[example]]
 name = "recipe_agent"
 path = "examples/recipe_agent/main.rs"
+
+[[example]]
+name = "eval_dataset"
+path = "examples/eval_dataset.rs"

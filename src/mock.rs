@@ -73,11 +73,7 @@ impl MockMultiTurnResponse {
     }
 
     /// Add a turn with tool calls and output text.
-    pub fn turn_with_text(
-        mut self,
-        tool_calls: Vec<ToolCall>,
-        text: impl Into<String>,
-    ) -> Self {
+    pub fn turn_with_text(mut self, tool_calls: Vec<ToolCall>, text: impl Into<String>) -> Self {
         self.turns.push(MockTurn {
             tool_calls,
             output_text: Some(text.into()),
@@ -184,6 +180,7 @@ impl AgentUnderTest for MockAgent {
                 tools_called: all_tools_called,
                 duration: Duration::from_millis(1),
                 error: None,
+                usage: None,
             });
         }
 
@@ -218,6 +215,7 @@ impl AgentUnderTest for MockAgent {
             tools_called,
             duration: Duration::from_millis(1),
             error: None,
+            usage: None,
         })
     }
 

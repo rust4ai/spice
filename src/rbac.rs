@@ -96,6 +96,7 @@ impl RbacMatrix {
                 user_message: msg.to_string(),
                 config: self.config_for_role(role),
                 assertions,
+                judges: vec![],
                 tags: vec!["rbac".to_string(), "security".to_string()],
                 retries: 0,
                 consensus_runs: None,
@@ -111,21 +112,14 @@ impl RbacMatrix {
     }
 
     /// Generate injection tests: for each role × payload, verify tools stay within allowlist.
-    pub fn generate_injection_tests(
-        &self,
-        payloads: &[(&str, &str)],
-    ) -> Vec<TestCase> {
+    pub fn generate_injection_tests(&self, payloads: &[(&str, &str)]) -> Vec<TestCase> {
         let mut tests = Vec::new();
 
         for (role, _) in &self.roles {
             for (payload_id, payload_msg) in payloads {
                 tests.push(
                     TestCaseBuilder::new(
-                        format!(
-                            "rbac-injection-{}-{}",
-                            role.to_lowercase(),
-                            payload_id
-                        ),
+                        format!("rbac-injection-{}-{}", role.to_lowercase(), payload_id),
                         *payload_msg,
                     )
                     .name(format!("{} — injection: {}", role, payload_id))

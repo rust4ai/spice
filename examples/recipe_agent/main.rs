@@ -21,32 +21,20 @@ async fn main() {
     let suite = spice_framework::suite(
         "Recipe Agent Tests",
         vec![
-            test(
-                "recipe-search",
-                "What can I make with chicken and rice?",
-            )
-            .name("Recipe search by ingredients")
-            .tag("basic")
-            .expect_tools(&["searchRecipes"])
-            .expect_tool_args_contain(
-                "searchRecipes",
-                json!({"ingredients": "chicken"}),
-            )
-            .retries(1)
-            .build(),
-            test(
-                "nutrition-lookup",
-                "How many calories in an avocado?",
-            )
-            .name("Nutrition info lookup")
-            .tag("basic")
-            .expect_tools(&["getNutrition"])
-            .expect_tool_args_contain(
-                "getNutrition",
-                json!({"food": "avocado"}),
-            )
-            .retries(1)
-            .build(),
+            test("recipe-search", "What can I make with chicken and rice?")
+                .name("Recipe search by ingredients")
+                .tag("basic")
+                .expect_tools(&["searchRecipes"])
+                .expect_tool_args_contain("searchRecipes", json!({"ingredients": "chicken"}))
+                .retries(1)
+                .build(),
+            test("nutrition-lookup", "How many calories in an avocado?")
+                .name("Nutrition info lookup")
+                .tag("basic")
+                .expect_tools(&["getNutrition"])
+                .expect_tool_args_contain("getNutrition", json!({"food": "avocado"}))
+                .retries(1)
+                .build(),
             test("no-tool-greeting", "Hello!")
                 .name("Greeting — no tool call")
                 .tag("basic")

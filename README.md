@@ -12,7 +12,12 @@ Spice lets you write declarative test suites that validate your AI agent's behav
 
 - **Fluent test builder** — chain assertions like `.expect_tools()`, `.expect_text_contains()`, `.forbid_tools()`
 - **30+ built-in assertions** — tool usage, argument validation, call counts, ordering, turn ranges, security allowlists, and custom closures
-- **Retry & consensus** — retry flaky tests N times, or require M-of-N runs to pass
+- **LLM-as-judge** *(0.2)* — model-graded assertions (`.expect_judge("rubric")`) with a pluggable `Judge` trait; ships `MockJudge` (offline) and `OpenAiJudge` (feature `openai`)
+- **Dataset fan-out** *(0.2)* — map one set of assertions over N rows from JSONL/JSON and report an aggregate pass rate
+- **Scores, not just pass/fail** *(0.2)* — per-test and per-suite `score` in `0.0..=1.0`
+- **Cost / latency metrics** *(0.2)* — `Usage` on `AgentOutput`, aggregated into token/cost totals + p50/p95 latency
+- **Baseline diffing** *(0.2)* — diff a run against a saved baseline; detect regressions in CI
+- **Retry & consensus** — retry flaky tests N times, or require M-of-N runs to pass (consensus records the full pass^k distribution)
 - **Concurrent runner** — run tests in parallel with configurable concurrency
 - **Trace recording** — every agent run is saved as JSON for debugging
 - **JSON reports** — machine-readable suite reports with pass/fail, timing, and assertion details
@@ -106,7 +111,8 @@ let report = runner.run(suite, Arc::new(my_agent)).await;
 
 | Builder method | What it checks |
 |---|---|
-| `.expect_tools(&["t"])` | Agent called these tools |
+| `.expect_tools(&["t"])` | Agent called these tools (subset) |
+| `.expect_exact_tools(&["t"])` | Agent called exactly this set (no extras, none missing) |
 | `.forbid_tools(&["t"])` | Agent did NOT call these tools |
 | `.expect_any_tool()` | At least one tool was called |
 | `.expect_no_tools()` | No tools were called |
@@ -128,6 +134,8 @@ let report = runner.run(suite, Arc::new(my_agent)).await;
 | `.expect_final_tool_arg("t", "p", val)` | Last turn's tool call has this arg |
 | `.expect_gathering_phase(&["read"])` | Gathering tools called before action tools |
 | `.expect_tool_only_on_final_turn("t")` | Tool appears on last turn only |
+| `.expect_judge("rubric")` | Model-graded: judge score ≥ 0.7 (see below) |
+| `.expect_judge_threshold("rubric", 0.9)` | Model-graded with an explicit threshold |
 | `.expect(closure)` | Custom assertion with `Fn(&AgentOutput) -> Result<(), String>` |
 
 ## Runner Configuration
@@ -140,6 +148,7 @@ RunnerConfig {
     tag_filter: Some(vec!["security".into()]), // only run tests with these tags
     trace_dir: Some("traces".into()),     // save JSON traces per run
     report_path: Some("report.json".into()), // save suite report
+    baseline_path: Some("baseline.json".into()), // diff this run against a baseline
     console_output: true,        // print results to terminal
 }
 ```
@@ -188,6 +197,74 @@ Total: 4/4 passed  (4.6s)
 ```
 
 After running, check `weather-report.json` for the full machine-readable report and `weather-traces/` for per-test JSON traces.
+
+## Evals (0.2)
+
+Beyond boolean trace assertions, Spice can run statistical, semantic evals. See
+[`examples/eval_dataset.rs`](examples/eval_dataset.rs) for all of the below
+working together offline (no API key), and [REVIEW.md](REVIEW.md) for the design
+rationale.
+
+### LLM-as-judge
+
+Substring checks can't tell you whether an answer is *correct*. A `Judge` grades
+free-form output against a natural-language rubric and returns a `0.0..=1.0`
+score with a reason. Install one on the runner:
+
+```rust
+use spice_framework::{Runner, RunnerConfig, MockJudge};
+use std::sync::Arc;
+
+let runner = Runner::new(RunnerConfig::default())
+    .with_judge(Arc::new(MockJudge::new().require(&["refund"])));
+
+// in a test:
+test("refund", "Where is my refund?")
+    .expect_tools(&["lookup"])
+    .expect_judge("The answer clearly explains the refund status.")
+    .build();
+```
+
+For real grading, enable the `openai` feature and use `OpenAiJudge::from_env()`
+(reads `OPENAI_API_KEY`). Implement the `Judge` trait for any other provider.
+
+### Datasets
+
+Run the same assertions across many inputs:
+
+```rust
+use spice_framework::dataset::Dataset;
+
+let data = Dataset::from_jsonl("cases.jsonl")?; // {"input": "...", "expected": {...}}
+let tests = data.map_tests(|row, b| {
+    b.expect_no_error()
+        .expect_judge(row.expected_str("rubric").unwrap_or("The answer is correct."))
+});
+```
+
+### Metrics & scores
+
+Report an agent's `Usage` and Spice aggregates it:
+
+```rust
+AgentOutput { /* ... */ usage: Some(Usage::tokens(120, 45).with_cost(0.0002)), ..Default::default() };
+```
+
+The `SuiteReport` then carries `.score` (mean 0–1), `.pass_rate`, and
+`.metrics` (`total_usage`, `latency_p50_ms`, `latency_p95_ms`).
+
+### Baseline diffing (CI regression gate)
+
+```rust
+let report = runner.run(suite, agent).await;
+let baseline = SuiteReport::load_from_file("baseline.json".as_ref())?;
+let diff = report.diff_against(&baseline);
+if diff.has_regressions() {
+    std::process::exit(1); // fail CI on any test that regressed
+}
+```
+
+Or set `RunnerConfig::baseline_path` to print the diff automatically after a run.
 
 ## License
 

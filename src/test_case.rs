@@ -3,6 +3,17 @@ use std::ops::RangeInclusive;
 
 use crate::agent::{AgentConfig, AgentOutput};
 
+/// Default pass threshold for a judge assertion when none is specified.
+pub const DEFAULT_JUDGE_THRESHOLD: f64 = 0.7;
+
+/// A model-graded expectation: grade the output against `rubric` and pass iff
+/// the judge's score is at least `threshold`.
+#[derive(Debug, Clone)]
+pub struct JudgeSpec {
+    pub rubric: String,
+    pub threshold: f64,
+}
+
 /// A single test case for an agent.
 pub struct TestCase {
     pub id: String,
@@ -10,6 +21,8 @@ pub struct TestCase {
     pub user_message: String,
     pub config: AgentConfig,
     pub assertions: Vec<Assertion>,
+    /// LLM-as-judge expectations, evaluated by the runner's judge.
+    pub judges: Vec<JudgeSpec>,
     pub tags: Vec<String>,
     pub retries: usize,
     pub consensus_runs: Option<usize>,
@@ -45,6 +58,7 @@ pub struct TestCaseBuilder {
     name: Option<String>,
     config: Option<AgentConfig>,
     assertions: Vec<Assertion>,
+    judges: Vec<JudgeSpec>,
     tags: Vec<String>,
     retries: usize,
     consensus_runs: Option<usize>,
@@ -60,6 +74,7 @@ impl TestCaseBuilder {
             name: None,
             config: None,
             assertions: vec![],
+            judges: vec![],
             tags: vec![],
             retries: 0,
             consensus_runs: None,
@@ -135,6 +150,35 @@ impl TestCaseBuilder {
         self
     }
 
+    /// The set of tools called equals exactly this set (order/count ignored,
+    /// but no extra tools and none missing).
+    pub fn expect_exact_tools(mut self, tools: &[&str]) -> Self {
+        self.assertions.push(Assertion::ExpectExactTools(
+            tools.iter().map(|s| s.to_string()).collect(),
+        ));
+        self
+    }
+
+    /// Grade the agent's final output against a natural-language rubric using
+    /// the runner's judge. Passes iff the judge's score ≥
+    /// [`DEFAULT_JUDGE_THRESHOLD`].
+    pub fn expect_judge(mut self, rubric: impl Into<String>) -> Self {
+        self.judges.push(JudgeSpec {
+            rubric: rubric.into(),
+            threshold: DEFAULT_JUDGE_THRESHOLD,
+        });
+        self
+    }
+
+    /// Like [`Self::expect_judge`] but with an explicit pass threshold.
+    pub fn expect_judge_threshold(mut self, rubric: impl Into<String>, threshold: f64) -> Self {
+        self.judges.push(JudgeSpec {
+            rubric: rubric.into(),
+            threshold,
+        });
+        self
+    }
+
     pub fn expect_text_contains(mut self, s: impl Into<String>) -> Self {
         self.assertions
             .push(Assertion::ExpectTextContains(s.into()));
@@ -162,11 +206,7 @@ impl TestCaseBuilder {
         self
     }
 
-    pub fn expect_tool_args(
-        mut self,
-        tool: impl Into<String>,
-        args: serde_json::Value,
-    ) -> Self {
+    pub fn expect_tool_args(mut self, tool: impl Into<String>, args: serde_json::Value) -> Self {
         self.assertions
             .push(Assertion::ExpectToolArgs(tool.into(), args));
         self
@@ -284,7 +324,10 @@ impl TestCaseBuilder {
     pub fn expect_gathering_phase(mut self, gather_tools: &[&str]) -> Self {
         self.assertions.push(Assertion::ExpectGatheringBeforeAction(
             gather_tools.iter().map(|s| s.to_string()).collect(),
-            vec!["say_to_user".to_string(), "task_fully_completed".to_string()],
+            vec![
+                "say_to_user".to_string(),
+                "task_fully_completed".to_string(),
+            ],
         ));
         self
     }
@@ -315,6 +358,7 @@ impl TestCaseBuilder {
             user_message: self.user_message,
             config: self.config.unwrap_or_else(AgentConfig::empty),
             assertions: self.assertions,
+            judges: self.judges,
             tags: self.tags,
             retries: self.retries,
             consensus_runs: self.consensus_runs,
